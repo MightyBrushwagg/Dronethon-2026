@@ -105,4 +105,5 @@ Telephone {
   translation -8.05 -6.52 0.95
 }
 Mavic2Pro {
+  supervisor TRUE
 }

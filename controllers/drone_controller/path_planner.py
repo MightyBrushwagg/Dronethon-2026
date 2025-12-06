@@ -14,6 +14,8 @@ from torchrl.modules.planners.mppi import MPPIPlanner
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
+HOVER_THRUST = 68.5
+
 
 class PathPlanner():
     def __init__(self, robot, timestep, perception=None, goal_positions=None, world_bounds=None,
@@ -55,16 +57,19 @@ class PathPlanner():
             # Try multiple possible paths for normalization file
             script_dir = Path(__file__).parent
             norm_file = script_dir / "checkpoints" / "normalization_stats.json"
+            
             if not norm_file.exists():
                 norm_file = Path("checkpoints/normalization_stats.json")
             
             if norm_file.exists():
-                with open(norm_file, 'r') as f:
+                with open(norm_file, "r") as f:
                     norm_stats = json.load(f)
-                    self.state_mean = torch.tensor(norm_stats['state_mean'], device=device, dtype=torch.float32)
-                    self.state_std = torch.tensor(norm_stats['state_std'], device=device, dtype=torch.float32)
-                    self.action_mean = torch.tensor(norm_stats['action_mean'], device=device, dtype=torch.float32)
-                    self.action_std = torch.tensor(norm_stats['action_std'], device=device, dtype=torch.float32)
+
+                    self.state_mean = torch.tensor(norm_stats["state_mean"], device=device, dtype=torch.float32)
+                    self.state_std = torch.tensor(norm_stats["state_std"], device=device, dtype=torch.float32)
+                    self.action_mean = torch.tensor(norm_stats["action_mean"], device=device, dtype=torch.float32)
+                    self.action_std = torch.tensor(norm_stats["action_std"], device=device, dtype=torch.float32)
+
                     print("Loaded normalization stats from checkpoint")
         
         # Create transition model

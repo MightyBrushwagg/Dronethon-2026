@@ -236,4 +236,5 @@ ToyotaPrius {
 }
 Mavic2Pro {
   controller "drone_controller"
+  supervisor TRUE
 }

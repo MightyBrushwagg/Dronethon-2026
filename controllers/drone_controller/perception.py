@@ -3,8 +3,6 @@ from controller import Robot, Camera, Compass, GPS, Gyro, InertialUnit, Keyboard
 import numpy as np
 import torch
 
-from controller import Robot
-
 class LidarPerception:
     def __init__(self, robot: Robot, lidar_name="lidar"):
         self.robot = robot
@@ -83,6 +81,9 @@ class Perception():
         self.width = self.camera.getWidth()
         self.height = self.camera.getHeight()
         
+        # For velocity calculation from position
+        self.prev_position = None
+        self.prev_time = None
 
         # setup range finders or lidar for obstacle detection
 
@@ -93,10 +94,26 @@ class Perception():
         Get the current state vector for MPPI: [x, y, z, roll, pitch, yaw, vx, vy, vz, wx, wy, wz]
         """
         # position
-        position = self.gps.getValues()  # [x, y, z]
+        position = np.array(self.gps.getValues())  # [x, y, z]
         orientation = self.imu.getRollPitchYaw()  # [roll, pitch, yaw]
-        angular_velocity = self.gyro.getValues()  # [wx, wy, wz
-        linear_velocity = self.imu.getLinearVelocity()  # [vx, vy, vz]
+        angular_velocity = self.gyro.getValues()  # [wx, wy, wz]
+        
+        # Calculate linear velocity from position difference
+        current_time = self.robot.getTime()
+        if self.prev_position is not None and self.prev_time is not None:
+            dt = current_time - self.prev_time
+            if dt > 0:
+                linear_velocity = (position - self.prev_position) / dt
+            else:
+                linear_velocity = np.array([0.0, 0.0, 0.0])
+        else:
+            # First call, no previous data
+            linear_velocity = np.array([0.0, 0.0, 0.0])
+        
+        # Update previous values for next call
+        self.prev_position = position
+        self.prev_time = current_time
+        
         return np.array([
             position[0], position[1], position[2],
             orientation[0], orientation[1], orientation[2],
