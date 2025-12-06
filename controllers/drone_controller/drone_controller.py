@@ -17,8 +17,8 @@
 from controller import Robot, Camera, LED
 
 from control import Control
-# from perception import Perception
-# from path_planner import PathPlanner
+from perception import Perception
+from path_planner import PathPlanner
 
 
 class DroneController():
@@ -31,21 +31,26 @@ class DroneController():
         self.front_right_led = self.robot.getDevice("front right led")
         
         self.control = Control(self.robot, self.timestep)
-        # self.perception = Perception(self.robot, self.timestep)
+        self.perception = Perception(self.robot, self.timestep)
         # self.path_planner = PathPlanner(self.robot, self.timestep)
+
 
         print("Drone Controller initialised successfully")
 
+
     def run(self):
+        i = 0
         print("Running Drone Controller...")
         while self.robot.step(self.timestep) != -1:
+            i += 1
             time = self.robot.getTime()  # in seconds
             
+            if i == 20: print(self.perception.lidar.get_360_sectors(num_sectors=32)) 
             # controlling motors
             # start_state = self.perception.get_state_vector()
             # action = self.path_planner.get_best_action(start_state, num_steps=10)
             action = [1, 0, 0, 1]
-            velocities = self.control.stabilise(self.timestep, action)
+            velocities = self.control.stabilise(self.timestep/1000, action)
             self.control.process_signal(velocities)  # this should change propellers
             
             pass

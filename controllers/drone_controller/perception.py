@@ -2,6 +2,7 @@ import cv2
 from controller import Robot, Camera, Compass, GPS, Gyro, InertialUnit, Keyboard, LED, Motor
 import numpy as np
 import torch
+import math
 
 class LidarPerception:
     def __init__(self, robot: Robot, lidar_name="lidar"):
@@ -9,7 +10,7 @@ class LidarPerception:
         self.timestep = int(robot.getBasicTimeStep())
 
         # Get and enable the lidar
-        self.lidar = robot.getDevice(lidar_name)
+        self.lidar = self.robot.getDevice(lidar_name)
         self.lidar.enable(self.timestep)
         self.lidar.enablePointCloud()
 
@@ -22,40 +23,59 @@ class LidarPerception:
 
     def get_ranges(self):
         """
-        Returns the full 2D array of distances:
-        shape = [num_layers][num_points]
+        Returns 2D array of distances [num_layers][num_points].
         """
-        ranges = self.lidar.getRangeImage()
-        return ranges   # already a Python list of lists
-
-    def get_front_left_right(self):
-        """
-        Get distances in three directions:
-        - front
-        - left
-        - right
-        (for single-layer lidar)
-        """
-        ranges = self.lidar.getRangeImage()
-        layer = ranges[0]  # single layer
-
-        mid = self.num_points // 2
-        left = self.num_points // 4
-        right = 3 * self.num_points // 4
-
-        return {
-            "front": layer[mid],
-            "left": layer[left],
-            "right": layer[right]
-        }
+        flat_ranges = self.lidar.getRangeImage()  # flat list or generator
+        # Convert generator to list if needed
+        flat_ranges = list(flat_ranges)
+        
+        # Reshape manually
+        if self.num_layers == 1:
+            return [flat_ranges]  # single layer
+        else:
+            ranges_2d = []
+            for i in range(self.num_layers):
+                start = i * self.num_points
+                end = start + self.num_points
+                ranges_2d.append(flat_ranges[start:end])
+            return ranges_2d
 
     def get_min_distance(self):
         """
         Shortest obstacle distance detected in front hemisphere.
         """
-        ranges = self.lidar.getRangeImage()[0]
+        ranges = self.get_ranges()[0]  # single layer
         return min(ranges)
 
+    def get_360_sectors(self, num_sectors=16):
+        """
+        Returns average distance in each sector around the robot, ignoring inf values.
+        """
+        ranges = self.get_ranges()  # [num_layers][num_points]
+        sector_size = self.num_points // num_sectors
+        sector_distances = {}
+
+        default_names = ["front", "front-right", "right", "back-right", 
+                         "back", "back-left", "left", "front-left"]
+        for i in range(num_sectors):
+            start_idx = i * sector_size
+            end_idx = start_idx + sector_size
+            sector_name = default_names[i % len(default_names)] if i < len(default_names) else f"sector_{i}"
+
+            # Collect all valid points in this sector across all layers
+            valid_points = []
+            for layer in ranges:
+                for d in layer[start_idx:end_idx]:
+                    if not math.isinf(d):
+                        valid_points.append(d)
+
+            # Average distance, or inf if no points
+            if valid_points:
+                sector_distances[sector_name] = sum(valid_points) / len(valid_points)
+            else:
+                sector_distances[sector_name] = float('inf')
+
+        return sector_distances
 
 
 class Perception():
@@ -80,6 +100,10 @@ class Perception():
 
         self.width = self.camera.getWidth()
         self.height = self.camera.getHeight()
+
+        self.lidar = LidarPerception(self.robot, "lidar")
+
+        print("Perception module initialised successfully")
         
         # For velocity calculation from position
         self.prev_position = None

@@ -40,25 +40,31 @@ class Control():
             motor.setVelocity(1.0)
             
         # PID gains TO TUNE!
-        self.k_vertical = {'p': 3.0, 'i': 0.1, 'd': 0.5}
-        self.k_roll = {'p': 50.0, 'i': 0.1, 'd': 15.0}
-        self.k_pitch = {'p': 30.0, 'i': 0.1, 'd': 10.0}
-        self.k_yaw = {'p': 1.0, 'i': 0.0, 'd': 0.5}
+        self.k_roll = {'p': 1.0, 'i': 0.0, 'd': 0.1}
+        self.k_pitch = {'p': 10.0, 'i': 5.0, 'd': 1}
+        self.k_yaw = {'p': 0.5, 'i': 0.0, 'd': 0.0}
         
         # integral accumulation
         self.integral = {'roll': 0, 'pitch': 0, 'yaw': 0, 'vertical': 0}
         self.prev_error = {'roll': 0, 'pitch': 0, 'yaw': 0, 'vertical': 0}
     
+<<<<<<< Updated upstream
         self.k_vertical_thrust = 68.5  # with this thrust, the drone lifts.
         self.k_vertical_offset = 0.6 
+=======
+        self.k_vertical_thrust = 68.5;  # with this thrust, the drone lifts.
+        self.k_vertical_offset = 0.6; 
+>>>>>>> Stashed changes
         
         
     def process_signal(self, vel):
-        print(f"these are the vels: {vel}")
+        # print(f"these are the vels: {vel}")
         """receive 4 velocities for each propeller"""
+        # signs = [1, -1, -1, 1]
         for motor, v in zip(self.motors, vel):
             # motor.setPosition(float('inf'))
-            motor.setVelocity(v)
+            clamped = max(-576, min(576, v))  # respect motor limits
+            motor.setVelocity(clamped)
             
     def _pid(self, error, axis, gains, dt):
         self.integral[axis] += error * dt
@@ -74,6 +80,7 @@ class Control():
         roll, pitch, _ = self.imu.getRollPitchYaw()
         altitude = self.gps.getValues()[2]
         roll_vel, pitch_vel, yaw_vel = self.gyro.getValues()
+        print(f"altitude: {altitude}, roll: {roll}, pitch: {pitch}")
         
         # stabilise camera by actuating the camera motors according to the gyro feedback.
         self.camera_roll_motor.setPosition(-0.115 * roll_vel)
@@ -91,9 +98,8 @@ class Control():
         +roll_corr - pitch_corr - yaw_corr,   # rear right
         ]
         
-        signs = [1, -1, -1, 1]
         
-        return [signs[i] * (vel[i] + corrections[i]) for i in range(4)]
+        return [vel[i] + corrections[i] for i in range(4)]
         
         
     def STOP(self):
