@@ -1,20 +1,23 @@
 import torch
 import torch.nn as nn
 import numpy as np
+import json
+from pathlib import Path
 from tensordict import TensorDict
 from torchrl.data import CompositeSpec, UnboundedContinuousTensorSpec
 from torchrl.envs.model_based import ModelBasedEnvBase
 from tensordict.nn import TensorDictModule
 from torchrl.modules import ValueOperator, MLP, WorldModelWrapper
 from torchrl.objectives.value import TDLambdaEstimator
-from torchrl.planners.mppi import MPPIPlanner
+from torchrl.modules.planners.mppi import MPPIPlanner
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
 
 class PathPlanner():
-    def __init__(self, robot, timestep, perception=None, goal_positions=None, world_bounds=None):
+    def __init__(self, robot, timestep, perception=None, goal_positions=None, world_bounds=None,
+                 transition_model_path=None, use_normalization=True):
         """
         Initialize MPPI path planner with world environment awareness.
         
@@ -24,6 +27,8 @@ class PathPlanner():
             perception: Perception module instance for obstacle detection
             goal_positions: List of target positions [[x1, y1, z1], [x2, y2, z2], ...]
             world_bounds: Dict with 'x_min', 'x_max', 'y_min', 'y_max', 'z_min', 'z_max'
+            transition_model_path: Path to trained transition model checkpoint (optional)
+            use_normalization: Whether to use normalization for states/actions (if available)
         """
         self.robot = robot
         self.timestep = timestep
@@ -32,24 +37,65 @@ class PathPlanner():
         
         # World boundaries for collision checking
         self.world_bounds = world_bounds if world_bounds else {
-            'x_min': -20, 'x_max': 20,
-            'y_min': -20, 'y_max': 20,
-            'z_min': 0.1, 'z_max': 10.0  # z_min > 0 to avoid ground collision
+            "x_min": -20, "x_max": 20,
+            "y_min": -20, "y_max": 20,
+            "z_min": 0.1, "z_max": 10.0  # z_min > 0 to avoid ground collision
         }
         
         state_dim = 12
         action_dim = 4
         
-        # predicts next state from current state and action
+        # Load normalization stats if available
+        self.state_mean = None
+        self.state_std = None
+        self.action_mean = None
+        self.action_std = None
+        
+        if use_normalization:
+            # Try multiple possible paths for normalization file
+            script_dir = Path(__file__).parent
+            norm_file = script_dir / "checkpoints" / "normalization_stats.json"
+            if not norm_file.exists():
+                norm_file = Path("checkpoints/normalization_stats.json")
+            
+            if norm_file.exists():
+                with open(norm_file, 'r') as f:
+                    norm_stats = json.load(f)
+                    self.state_mean = torch.tensor(norm_stats['state_mean'], device=device, dtype=torch.float32)
+                    self.state_std = torch.tensor(norm_stats['state_std'], device=device, dtype=torch.float32)
+                    self.action_mean = torch.tensor(norm_stats['action_mean'], device=device, dtype=torch.float32)
+                    self.action_std = torch.tensor(norm_stats['action_std'], device=device, dtype=torch.float32)
+                    print("Loaded normalization stats from checkpoint")
+        
+        # Create transition model
+        transition_mlp = MLP(
+            in_features=state_dim + action_dim,
+            out_features=state_dim,
+            activation_class=nn.ReLU,
+            activate_last_layer=False,
+            depth=2,
+            num_cells=64,
+        )
+        
+        # Load trained weights if provided
+        if transition_model_path:
+            self._load_transition_model(transition_mlp, transition_model_path)
+        else:
+            # Try to load default checkpoint
+            script_dir = Path(__file__).parent
+            default_checkpoint = script_dir / "checkpoints" / "transition_model.pth"
+            if not default_checkpoint.exists():
+                default_checkpoint = Path("checkpoints/transition_model.pth")
+            
+            if default_checkpoint.exists():
+                self._load_transition_model(transition_mlp, str(default_checkpoint.relative_to(script_dir)) if script_dir in default_checkpoint.parents else "transition_model.pth")
+            else:
+                print("Warning: Using untrained transition model. Consider training first!")
+                print("  Run: python train_transition_model.py --mode both")
+        
+        # Wrap in TensorDictModule
         transition_model = TensorDictModule(
-            MLP(
-                in_features=state_dim + action_dim,
-                out_features=state_dim,
-                activation_class=nn.ReLU,
-                activate_last_layer=False,
-                depth=2,
-                num_cells=64,
-            ),
+            transition_mlp,
             in_keys=["state", "action"],
             out_keys=["state"],
         )
@@ -115,6 +161,35 @@ class PathPlanner():
             num_candidates=7,
             top_k=3,
         )
+    
+    def _load_transition_model(self, model, checkpoint_path):
+        """Load trained transition model weights."""
+        checkpoint_file = Path(checkpoint_path)
+        if not checkpoint_file.is_absolute() and not checkpoint_file.exists():
+            # Try relative to script directory
+            script_dir = Path(__file__).parent
+            checkpoint_file = script_dir / "checkpoints" / checkpoint_path
+            if not checkpoint_file.exists():
+                # Try relative to current directory
+                checkpoint_file = Path("checkpoints") / checkpoint_path
+                if not checkpoint_file.exists():
+                    print(f"Warning: Checkpoint not found at {checkpoint_path}, using random initialization")
+                    return
+        
+        try:
+            checkpoint = torch.load(checkpoint_file, map_location=device)
+            model_state = checkpoint['model_state_dict']
+            
+            # Handle both direct state dict and wrapped state dict
+            if any('module.' in key for key in model_state.keys()):
+                # Remove 'module.' prefix if present
+                model_state = {k.replace('module.', ''): v for k, v in model_state.items()}
+            
+            model.load_state_dict(model_state)
+            print(f"Loaded trained transition model from {checkpoint_file}")
+        except Exception as e:
+            print(f"Error loading checkpoint: {e}")
+            print("Using random initialization instead")
     
     def update_goals(self, new_goal_positions):
         """Update goal positions (e.g., when targets are found)."""

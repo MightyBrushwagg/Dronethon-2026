@@ -6,32 +6,32 @@ def sign(x):
     """Return the sign of x: 1 if positive, -1 if negative, 0 if zero."""
     return 1 if x > 0 else (-1 if x < 0 else 0)
 
-class Control(Robot):
-    def __init__(self, timestep):
-        super().__init__()
+class Control:
+    def __init__(self, robot, timestep):
+        self.robot = robot
         # motors
-        self.fl_motor = Robot.getDevice("front left propeller")
-        self.fr_motor = Robot.getDevice("front right propeller")
-        self.rl_motor = Robot.getDevice("rear left propeller")
-        self.rr_motor = Robot.getDevice("rear right propeller")
+        self.fl_motor = robot.getDevice("front left propeller")
+        self.fr_motor = robot.getDevice("front right propeller")
+        self.rl_motor = robot.getDevice("rear left propeller")
+        self.rr_motor = robot.getDevice("rear right propeller")
         self.motors = [self.fl_motor, self.fr_motor, self.rl_motor, self.rr_motor]
         
         self.timestep = timestep
         
         # camera control
-        self.camera_roll_motor = self.robot.getDevice("camera roll")
-        self.camera_pitch_motor = self.robot.getDevice("camera pitch")
+        self.camera_roll_motor = robot.getDevice("camera roll")
+        self.camera_pitch_motor = robot.getDevice("camera pitch")
         self.camera_roll_motor.setPosition(0)
         self.camera_pitch_motor.setPosition(0)
         self.camera_roll_motor.enable(self.timestep)
         self.camera_pitch_motor.enable(self.timestep)
         
         # sensors
-        self.imu = self.getDevice("inertial unit")
+        self.imu = robot.getDevice("inertial unit")
         self.imu.enable(timestep)
-        self.gps = self.getDevice("gps")
+        self.gps = robot.getDevice("gps")
         self.gps.enable(timestep)
-        self.gyro = self.getDevice("gyro")
+        self.gyro = robot.getDevice("gyro")
         self.gyro.enable(timestep)
             
         # initalising motors
@@ -49,8 +49,8 @@ class Control(Robot):
         self.integral = {'roll': 0, 'pitch': 0, 'yaw': 0, 'vertical': 0}
         self.prev_error = {'roll': 0, 'pitch': 0, 'yaw': 0, 'vertical': 0}
     
-        k_vertical_thrust = 68.5;  # with this thrust, the drone lifts.
-        k_vertical_offset = 0.6; 
+        self.k_vertical_thrust = 68.5  # with this thrust, the drone lifts.
+        self.k_vertical_offset = 0.6 
         
         
     def process_signal(self, vel):
