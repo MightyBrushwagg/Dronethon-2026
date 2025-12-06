@@ -99,6 +99,7 @@ class Perception():
 
         self.camera = self.robot.getDevice("camera")
         self.camera.enable(self.timestep)
+        self.camera.recognitionEnable(self.timestep)
 
         self.width = self.camera.getWidth()
         self.height = self.camera.getHeight()
@@ -167,13 +168,24 @@ class Perception():
     
     def detect_items(self, image=None):
         """Placeholder for item detection logic."""
-        if image is None:
-            image = self.get_camera_image()
+        # if image is None:
+        #     image = self.get_camera_image()
         # Implement item detection logic here
         # Initialize the ORB detector
-        orb = cv2.ORB_create()
-
-        # Detect keypoints and compute descriptors
-        keypoints, descriptors = orb.detectAndCompute(image, None)
-        return descriptors
+        
+        # Run detection on image
+        # print("Detecting items...")
+        
+        objects = self.camera.getRecognitionObjects()
+        for obj in objects:
+            # # obj is a Webots Object instance
+            if obj.getModel() == "Medicine":
+                print("Detected a MedicineBottle!")
+            elif obj.getModel() == "fire extinguisher":
+                print("Detected a fire extinguisher!")
+            elif obj.getModel() == "Telephone":
+                print("Detected a Telephone!")
+            # print(f"Detected object ID {obj.getId()} at position {obj.getPosition()}")
+            # print(f"Size: {obj.getSize()}, Orientation: {obj.getOrientation()}")
+            # print(f"Color: {obj.getColors()}, Model: {obj.getModel()}")
     

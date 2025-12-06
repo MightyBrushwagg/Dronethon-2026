@@ -54,11 +54,22 @@ class Control():
         
         
     def process_signal(self, vel):
+<<<<<<< Updated upstream
         # print(f"these are the vels: {vel}")
+=======
+        # print("these are the vels: ")
+>>>>>>> Stashed changes
         """receive 4 velocities for each propeller"""
         for motor, v in zip(self.motors, vel):
             # motor.setPosition(float('inf'))
+<<<<<<< Updated upstream
             motor.setVelocity(v)
+=======
+            signed_vel = sign * v
+            clamped = max(-576, min(576, signed_vel))  # respect motor limits
+            motor.setVelocity(clamped)
+        # print()
+>>>>>>> Stashed changes
             
     def _pid(self, error, axis, gains, dt):
         self.integral[axis] += error * dt
