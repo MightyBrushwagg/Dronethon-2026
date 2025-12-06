@@ -40,6 +40,12 @@ class DroneController():
         print("Running Drone Controller...")
         while self.robot.step(self.timestep) != -1:
             time = self.robot.getTime()  # in seconds
+            
+            # controlling motors
+            vel = [2, 2, 1, 1] # HERE!!! pass in your list of 4 velocites as vel
+            velocities = self.control.stabilise(self.timestep, vel)
+            self.control.process_signal(velocities)  # this should change propellers
+            
             pass
 
         print("Drone Controller stopped")
