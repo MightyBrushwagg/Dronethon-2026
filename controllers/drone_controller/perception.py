@@ -148,14 +148,82 @@ class Perception():
     
     def get_obstacle_distances(self):
         """
-        Get distance to nearest obstacles in multiple directions.
+        Get distance to nearest obstacles in multiple directions using lidar.
+        
+        Returns:
+            dict with keys: "front", "left", "right", "back", "up", "down"
+            Values are minimum distances in meters, or inf if no obstacle detected
         """
-        # user lidar or range finders (ray casting)
-        # distances = {"front": front_distance, "left": left_distance, "right": right_distance, "back": back_distance, "up": up_distance, "down": down_distance}
-        # return distances
-
-
-        pass
+        distances = {
+            "front": float('inf'),
+            "left": float('inf'),
+            "right": float('inf'),
+            "back": float('inf'),
+            "up": float('inf'),
+            "down": float('inf')
+        }
+        
+        try:
+            lidar_ranges = self.lidar.get_ranges()
+            if not lidar_ranges or len(lidar_ranges) == 0:
+                return distances
+            
+            # Get ranges from bottom layer (closest to obstacles)
+            ranges = lidar_ranges[0] if isinstance(lidar_ranges[0], list) else lidar_ranges
+            num_points = len(ranges)
+            
+            if num_points == 0:
+                return distances
+            
+            # Divide lidar scan into sectors
+            sector_size = num_points // 4  # 4 sectors: front, right, back, left
+            
+            # Front sector (0 to sector_size)
+            front_ranges = [r for r in ranges[0:sector_size] if not math.isinf(r) and r > 0]
+            if front_ranges:
+                distances["front"] = min(front_ranges)
+            
+            # Right sector (sector_size to 2*sector_size)
+            right_ranges = [r for r in ranges[sector_size:2*sector_size] if not math.isinf(r) and r > 0]
+            if right_ranges:
+                distances["right"] = min(right_ranges)
+            
+            # Back sector (2*sector_size to 3*sector_size)
+            back_ranges = [r for r in ranges[2*sector_size:3*sector_size] if not math.isinf(r) and r > 0]
+            if back_ranges:
+                distances["back"] = min(back_ranges)
+            
+            # Left sector (3*sector_size to end)
+            left_ranges = [r for r in ranges[3*sector_size:] if not math.isinf(r) and r > 0]
+            if left_ranges:
+                distances["left"] = min(left_ranges)
+            
+            # Check vertical obstacles (use different layers)
+            if len(lidar_ranges) > 1:
+                # Top layer for "up" obstacles
+                top_ranges = lidar_ranges[-1] if isinstance(lidar_ranges[-1], list) else []
+                if top_ranges:
+                    up_ranges = [r for r in top_ranges if not math.isinf(r) and r > 0]
+                    if up_ranges:
+                        distances["up"] = min(up_ranges)
+                
+                # Bottom layer for "down" obstacles (ground)
+                bottom_ranges = lidar_ranges[0] if isinstance(lidar_ranges[0], list) else []
+                if bottom_ranges:
+                    down_ranges = [r for r in bottom_ranges if not math.isinf(r) and r > 0]
+                    if down_ranges:
+                        distances["down"] = min(down_ranges)
+            else:
+                # Single layer - use it for down (ground)
+                down_ranges = [r for r in ranges if not math.isinf(r) and r > 0]
+                if down_ranges:
+                    distances["down"] = min(down_ranges)
+        
+        except Exception as e:
+            # If obstacle detection fails, return default distances
+            pass
+        
+        return distances
         
     
     def get_camera_depth_map(self):

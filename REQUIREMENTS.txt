@@ -1,0 +1,10 @@
+# Core dependencies for drone controller
+numpy>=1.20.0
+torch>=2.0.0
+tensordict>=0.2.0
+torchrl>=0.2.0
+opencv-python>=4.5.0
+
+# Note: torchrl automatically installs tensordict as a dependency
+# but we list it explicitly to ensure compatibility
+

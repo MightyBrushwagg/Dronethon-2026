@@ -246,10 +246,10 @@ class DataCollectorController:
                     self.robot.step(0)
                     self.robot_node = self.robot.getSelf()
                     if self.robot_node is None:
-                        print("[INIT] ⚠ getSelf() returned None, trying DEF names...")
+                        print("[INIT] ⚠ getSelf() returned None, trying DEF names and robot name...")
                         sys.stdout.flush()
                         # Try to get from DEF name (common drone DEF names)
-                        for def_name in ["DRONE", "drone", "Drone", "Quadcopter", "quadcopter", "Mavic2Pro"]:
+                        for def_name in ["MAVIC", "DRONE", "drone", "Drone", "Quadcopter", "quadcopter", "Mavic2Pro", "Mavic 2 PRO"]:
                             try:
                                 self.robot_node = self.robot.getFromDef(def_name)
                                 if self.robot_node is not None:
@@ -258,6 +258,36 @@ class DataCollectorController:
                                     break
                             except:
                                 pass
+                        
+                        # If DEF didn't work, try getting by robot name
+                        if self.robot_node is None:
+                            try:
+                                # Try to get root node and find robot child
+                                root_node = self.robot.getRoot()
+                                if root_node is not None:
+                                    # Try to get children and find the robot
+                                    children_count = root_node.getField("children").getCount()
+                                    for i in range(children_count):
+                                        try:
+                                            child = root_node.getField("children").getMFNode(i)
+                                            if child is not None:
+                                                # Check if this is the robot node
+                                                try:
+                                                    name_field = child.getField("name")
+                                                    if name_field is not None:
+                                                        name = name_field.getSFString()
+                                                        if "Mavic" in name or "mavic" in name or "drone" in name.lower():
+                                                            self.robot_node = child
+                                                            print(f"[INIT] ✓ Found robot node by name: '{name}'")
+                                                            sys.stdout.flush()
+                                                            break
+                                                except:
+                                                    pass
+                                        except:
+                                            pass
+                            except Exception as e:
+                                print(f"[INIT] ⚠ Could not search for robot by name: {e}")
+                                sys.stdout.flush()
                     
                     if self.robot_node is not None:
                         # Verify we can access fields
@@ -445,19 +475,18 @@ class DataCollectorController:
         print(f"\n[INIT] Ascending to hover altitude: {target_altitude}m")
         sys.stdout.flush()
         
-        # Higher base hover thrust - needs to overcome gravity better
-        # Increase from 68.5 to 72-75 for more stable hover
-        HIGHER_HOVER_THRUST = 73.0
-        
-        # Altitude control PID parameters (more conservative to prevent flipping)
-        alt_kp = 8.0   # Reduced from 15.0 to prevent overshoot
-        alt_ki = 0.05  # Reduced integral gain
-        alt_kd = 3.0   # Reduced derivative gain
-        alt_integral = 0.0
-        prev_alt_error = 0.0
+        # Use the control module's built-in hover thrust
+        BASE_HOVER_THRUST = self.control.k_vertical_thrust  # 68.5
+        # Increase hover thrust slightly - 68.5 seems slightly low based on behavior
+        ACTUAL_HOVER_THRUST = 69.5  # Slightly higher than base to maintain altitude
+        TAKEOFF_THRUST = 72.0  # Slightly higher thrust for takeoff
         
         steps_at_target = 0
         steps_required_stable = 30  # Need to be stable for 30 steps
+        
+        # Phase-based takeoff - skip ground stabilization, go straight to takeoff
+        phase = "takeoff"  # Start directly with takeoff
+        takeoff_start_step = 0
         
         for step in range(max_steps):
             if self.robot.step(self.timestep) == -1:
@@ -468,53 +497,226 @@ class DataCollectorController:
                 state = self.perception.get_state_vector()
                 current_altitude = state[2]  # z coordinate
                 roll, pitch = state[3], state[4]
+                roll_vel, pitch_vel, yaw_vel = self.perception.gyro.getValues()
                 
-                # Calculate altitude error first (always needed)
-                alt_error = target_altitude - current_altitude
-                
-                # Safety check: if drone is tilting too much, use higher thrust to stabilize
                 tilt_magnitude = np.sqrt(roll**2 + pitch**2)
-                if tilt_magnitude > 0.3:  # More than 0.3 rad tilt
-                    # Use stabilizing thrust
-                    base_thrust = HIGHER_HOVER_THRUST + 2.0  # Extra boost
-                    print(f"[INIT] ⚠ Large tilt detected (roll={roll:.2f}, pitch={pitch:.2f}), increasing thrust")
-                    sys.stdout.flush()
-                else:
-                    # Normal altitude control
+                
+                # Initialize base_thrust
+                base_thrust = TAKEOFF_THRUST
+                
+                # Phase 1: Takeoff - use higher thrust to lift off
+                if phase == "takeoff":
+                    if step == takeoff_start_step:
+                        print(f"[INIT] Starting takeoff with thrust {TAKEOFF_THRUST}")
+                        sys.stdout.flush()
                     
-                    # PID control for altitude (only if not too far off)
-                    dt = self.timestep / 1000.0  # Convert ms to seconds
-                    
-                    # If we're far below target, use aggressive ascent
-                    if alt_error > 0.5:  # More than 50cm below target
-                        # Use higher thrust for ascent
-                        alt_correction = min(alt_kp * alt_error * 1.5, 8.0)  # Limit correction
-                        base_thrust = HIGHER_HOVER_THRUST + alt_correction
+                    if current_altitude < 0.2:  # Still on or very near ground
+                        # Use maximum takeoff thrust
+                        base_thrust = TAKEOFF_THRUST
+                        # Only reduce if severely tilting
+                        if tilt_magnitude > 0.4:
+                            base_thrust = TAKEOFF_THRUST - 2.0
+                    elif current_altitude < 0.5:  # Early ascent
+                        # Still use high thrust but start gradual reduction
+                        progress = (current_altitude - 0.2) / 0.3  # 0 to 1 from 0.2m to 0.5m
+                        base_thrust = TAKEOFF_THRUST * (1 - progress * 0.2) + ACTUAL_HOVER_THRUST * (progress * 0.2)
+                        base_thrust = max(ACTUAL_HOVER_THRUST + 1.0, min(TAKEOFF_THRUST, base_thrust))
+                    elif current_altitude < 1.0:  # Mid-ascent - reduce thrust more gradually
+                        # Gradual transition to hover thrust
+                        progress = (current_altitude - 0.5) / 0.5  # 0 to 1 from 0.5m to 1.0m
+                        base_thrust = (TAKEOFF_THRUST - 1.5) * (1 - progress * 0.6) + ACTUAL_HOVER_THRUST * (progress * 0.6)
+                        base_thrust = max(ACTUAL_HOVER_THRUST, min(TAKEOFF_THRUST - 1.5, base_thrust))
+                    elif current_altitude < 1.3:  # Late ascent - transition to hover
+                        # Very gradual transition near target
+                        progress = (current_altitude - 1.0) / 0.3  # 0 to 1 from 1.0m to 1.3m
+                        base_thrust = (ACTUAL_HOVER_THRUST + 0.5) * (1 - progress) + ACTUAL_HOVER_THRUST * progress
+                    elif abs(current_altitude - target_altitude) < 0.4:  # Within 40cm of target
+                        # Switch to hover control once close to target
+                        phase = "hover"
+                        print(f"[INIT] Reached {current_altitude:.2f}m (within 40cm of target), switching to hover control")
+                        sys.stdout.flush()
                     else:
-                        # Normal PID control
-                        alt_integral += alt_error * dt
-                        alt_integral = max(-3.0, min(3.0, alt_integral))  # Clamp integral tighter
-                        alt_derivative = (alt_error - prev_alt_error) / dt if dt > 0 else 0
-                        prev_alt_error = alt_error
+                        # Still transitioning - use intermediate thrust
+                        if current_altitude < target_altitude:
+                            # Below target, use slightly higher thrust
+                            base_thrust = ACTUAL_HOVER_THRUST + 0.5
+                        else:
+                            # Above target, use slightly lower thrust to prevent overshoot
+                            base_thrust = ACTUAL_HOVER_THRUST - 1.0
+                
+                # Phase 2: Hover control - fine altitude adjustment (very conservative)
+                elif phase == "hover":
+                    alt_error = target_altitude - current_altitude
+                    dt = self.timestep / 1000.0
+                    
+                    # Initialize velocity tracking for damping
+                    if not hasattr(self, 'prev_altitude'):
+                        self.prev_altitude = current_altitude
+                        self.prev_altitude_time = self.robot.getTime()
+                    
+                    # Calculate vertical velocity for damping
+                    current_time = self.robot.getTime()
+                    dt_actual = current_time - self.prev_altitude_time
+                    if dt_actual > 0:
+                        vertical_velocity = (current_altitude - self.prev_altitude) / dt_actual
+                    else:
+                        vertical_velocity = 0.0
+                    
+                    self.prev_altitude = current_altitude
+                    self.prev_altitude_time = current_time
+                    
+                    # Dead zone - don't correct if very close to target
+                    if abs(alt_error) < 0.25:  # Within 25cm
+                        vertical_input = 0.0
+                    else:
+                        # Use very conservative linear control with strong damping
+                        # Different gains for above vs below target (asymmetric control)
+                        if alt_error > 0:  # Above target - need to reduce thrust
+                            k_vertical_p = 0.4  # More gentle when above (prevent overshoot)
+                            k_vertical_d = 6.0  # Strong damping when descending
+                        else:  # Below target - need to increase thrust
+                            k_vertical_p = 0.6  # Slightly more aggressive when below
+                            k_vertical_d = 4.0  # Moderate damping when ascending
                         
-                        # Calculate thrust adjustment
-                        alt_correction = alt_kp * alt_error + alt_ki * alt_integral + alt_kd * alt_derivative
-                        alt_correction = max(-5.0, min(5.0, alt_correction))  # Limit correction
-                        base_thrust = HIGHER_HOVER_THRUST + alt_correction
+                        # Reduce correction if already moving toward target
+                        if alt_error > 0 and vertical_velocity < -0.2:
+                            # Above target and descending - reduce downward correction
+                            correction_multiplier = 0.5
+                        elif alt_error < 0 and vertical_velocity > 0.2:
+                            # Below target and ascending - reduce upward correction
+                            correction_multiplier = 0.5
+                        else:
+                            correction_multiplier = 1.0
+                        
+                        # Linear control with damping
+                        vertical_input = correction_multiplier * (k_vertical_p * alt_error - k_vertical_d * vertical_velocity)
+                    
+                    # Add smoothing filter to prevent rapid changes
+                    if not hasattr(self, 'prev_vertical_input'):
+                        self.prev_vertical_input = 0.0
+                    
+                    # Strong smoothing (exponential moving average)
+                    smoothing_factor = 0.15  # Very strong smoothing
+                    vertical_input = self.prev_vertical_input * (1 - smoothing_factor) + vertical_input * smoothing_factor
+                    self.prev_vertical_input = vertical_input
+                    
+                    # Clamp vertical_input to prevent extreme corrections
+                    vertical_input = max(-1.5, min(1.5, vertical_input))  # Very tight limits
+                    
+                    # Use slightly higher base hover thrust to compensate for slight under-thrust
+                    base_thrust = ACTUAL_HOVER_THRUST + vertical_input
                 
-                # Keep thrust in safe range
-                base_thrust = max(65.0, min(82.0, base_thrust))
+                # Clamp thrust to safe range (allow higher for takeoff)
+                if phase == "takeoff":
+                    # No cap during takeoff - allow full thrust
+                    # base_thrust is used as-is, no clamping
+                    pass
+                else:
+                    base_thrust = max(65.0, min(75.0, base_thrust))  # Normal range for hover
                 
-                # Apply same thrust to all motors for vertical ascent/hover
-                action = np.array([base_thrust] * 4)
+                # Temporarily disable camera stabilization during takeoff phase
+                # (re-enable after stable hover is achieved)
+                if phase == "takeoff":
+                    # Disable camera motors during takeoff - keep them centered
+                    try:
+                        self.control.camera_roll_motor.setPosition(0.0)
+                        self.control.camera_pitch_motor.setPosition(0.0)
+                    except:
+                        pass
+                elif phase == "hover":
+                    # Re-enable camera stabilization but with limits
+                    # The stabilise() method will handle this with clamping
+                    pass
                 
-                # Execute control
-                velocities = self.control.stabilise(self.timestep, action)
-                self.control.process_signal(velocities)
+                # Simple stabilization - use same formula as working C code
+                # C code: roll_input = k_roll_p * CLAMP(roll, -1.0, 1.0) + roll_velocity
+                #         pitch_input = k_pitch_p * CLAMP(pitch, -1.0, 1.0) + pitch_velocity
+                if phase == "takeoff" and tilt_magnitude > 0.3:
+                    # Use same gains as working C code (k_roll_p=50, k_pitch_p=30)
+                    k_roll_p = 50.0
+                    k_pitch_p = 30.0
+                    
+                    roll_clamped = max(-1.0, min(1.0, roll))
+                    pitch_clamped = max(-1.0, min(1.0, pitch))
+                    
+                    roll_corr = k_roll_p * roll_clamped + roll_vel
+                    pitch_corr = k_pitch_p * pitch_clamped + pitch_vel
+                    yaw_corr = 0  # No yaw during takeoff
+                    
+                    # Clamp corrections to prevent extreme values
+                    roll_corr = max(-15.0, min(15.0, roll_corr))
+                    pitch_corr = max(-15.0, min(15.0, pitch_corr))
+                    
+                    # Manual control with minimal corrections
+                    corrections = [
+                        -roll_corr + pitch_corr - yaw_corr,   # front left
+                        +roll_corr + pitch_corr + yaw_corr,   # front right
+                        -roll_corr - pitch_corr + yaw_corr,   # rear left
+                        +roll_corr - pitch_corr - yaw_corr,   # rear right
+                    ]
+                    
+                    # Apply corrections to base thrust
+                    motor_velocities = [base_thrust + corrections[i] for i in range(4)]
+                    # No caps during takeoff - allow full thrust
+                    if phase == "takeoff":
+                        # No clamping during takeoff
+                        pass
+                    else:
+                        motor_velocities = [max(60.0, min(78.0, v)) for v in motor_velocities]
+                    
+                    # Set motors directly with correct signs
+                    # Motor signs: [1, -1, -1, 1] (front_left, front_right, rear_left, rear_right)
+                    signs = [1, -1, -1, 1]
+                    for motor, vel, sign in zip(self.control.motors, motor_velocities, signs):
+                        motor.setVelocity(sign * vel)
+                else:
+                    # Always use the same control formula as working C code (consistent behavior)
+                    k_roll_p = 50.0
+                    k_pitch_p = 30.0
+                    
+                    roll_clamped = max(-1.0, min(1.0, roll))
+                    pitch_clamped = max(-1.0, min(1.0, pitch))
+                    
+                    # Roll and pitch inputs from working C code
+                    roll_input = k_roll_p * roll_clamped + roll_vel
+                    pitch_input = k_pitch_p * pitch_clamped + pitch_vel
+                    yaw_input = 0  # No yaw control during hover/takeoff
+                    
+                    # Clamp inputs to prevent extreme corrections (safety limit)
+                    roll_input = max(-20.0, min(20.0, roll_input))
+                    pitch_input = max(-20.0, min(20.0, pitch_input))
+                    
+                    # Calculate motor inputs exactly like working C code:
+                    # In C code: motor_input = k_vertical_thrust + vertical_input +/- roll_input +/- pitch_input +/- yaw_input
+                    # Our base_thrust already includes vertical_input for hover phase
+                    # For takeoff, base_thrust is just the takeoff thrust value
+                    
+                    front_left_input = base_thrust - roll_input + pitch_input - yaw_input
+                    front_right_input = base_thrust + roll_input + pitch_input + yaw_input
+                    rear_left_input = base_thrust - roll_input - pitch_input + yaw_input
+                    rear_right_input = base_thrust + roll_input - pitch_input - yaw_input
+                    
+                    motor_velocities = [front_left_input, front_right_input, rear_left_input, rear_right_input]
+                    
+                    # Clamp motor velocities (reasonable limits)
+                    if phase == "takeoff":
+                        motor_velocities = [max(65.0, min(80.0, v)) for v in motor_velocities]
+                    else:
+                        motor_velocities = [max(60.0, min(75.0, v)) for v in motor_velocities]
+                    
+                    # Motor signs: [1, -1, -1, 1] (front_left, front_right, rear_left, rear_right)
+                    signs = [1, -1, -1, 1]
+                    for motor, vel, sign in zip(self.control.motors, motor_velocities, signs):
+                        motor.setVelocity(sign * vel)
                 
-                # Check if we're at target altitude and stable
-                altitude_error = abs(alt_error)
-                orientation_stable = abs(roll) < 0.15 and abs(pitch) < 0.15  # Tighter stability requirement
+                # Check if we're at target altitude and stable (only in hover phase)
+                if phase == "hover":
+                    alt_error = target_altitude - current_altitude
+                    altitude_error = abs(alt_error)
+                    orientation_stable = abs(roll) < 0.15 and abs(pitch) < 0.15
+                else:
+                    altitude_error = abs(target_altitude - current_altitude)
+                    orientation_stable = False  # Don't check until in hover phase
                 
                 if altitude_error < 0.15 and orientation_stable:  # Within 15cm of target
                     steps_at_target += 1
@@ -736,15 +938,27 @@ class DataCollectorController:
                         # Skip this step
                         continue
                     
-                    # Generate action (random exploration)
-                    # Convert normalized values to motor velocities if needed
-                    # The control.stabilise() expects motor velocities around 68.5 for hover
-                    if self.current_step % 5 == 0:  # Change action every 5 steps
-                        # Random action - using actual motor velocity values
-                        # 68.5 is approximately hover thrust
-                        base_thrust = HOVER_THRUST  # Hover thrust
-                        action = base_thrust + np.random.uniform(-10, 10, 4)
-                        action = np.clip(action, 50, 100)  # Keep in reasonable range
+                    # Generate action (random exploration) - independent motor offsets for better training
+                    # Use small random variations to explore motor space while keeping drone stable
+                    if self.current_step % 30 == 0:  # Change action every 30 steps (even less frequent)
+                        # Random action - independent offsets for each motor to train on diverse motor combinations
+                        base_thrust = HOVER_THRUST  # 68.5 hover thrust
+                        
+                        # Independent random variations for each motor
+                        # Keep small enough to prevent flipping, but different per motor for training diversity
+                        # ±2.0 per motor allows exploring roll/pitch/yaw control while staying stable
+                        motor_offsets = np.random.uniform(-2.0, 2.0, 4)
+                        action = base_thrust + motor_offsets  # Different offset per motor
+                        
+                        # Ensure average thrust is close to hover (prevents overall altitude drift)
+                        avg_offset = np.mean(motor_offsets)
+                        if abs(avg_offset) > 0.5:  # If average is too far from zero, recenter
+                            action = action - avg_offset + np.random.uniform(-0.3, 0.3)
+                        
+                        # Smooth the action with previous action if available
+                        if self.prev_action is not None:
+                            smoothing = 0.3  # Strong smoothing - blend 30% new, 70% old
+                            action = action * smoothing + self.prev_action * (1 - smoothing)
                     else:
                         # Keep previous action
                         if self.prev_action is None:
@@ -752,10 +966,109 @@ class DataCollectorController:
                         else:
                             action = self.prev_action
                     
-                    # Execute action
+                    # Execute action - use gentle manual control instead of stabilise() to prevent erratic movements
                     try:
-                        velocities = self.control.stabilise(self.timestep, action)
-                        self.control.process_signal(velocities)
+                        # Get current state for stabilization
+                        state = self.perception.get_state_vector()
+                        current_altitude = state[2]
+                        roll, pitch = state[3], state[4]
+                        roll_vel, pitch_vel, yaw_vel = self.perception.gyro.getValues()
+                        
+                        # Target altitude for data collection (same as hover phase)
+                        target_altitude = self.HOVER_ALTITUDE
+                        
+                        # Altitude control to prevent drifting down
+                        alt_error = target_altitude - current_altitude
+                        
+                        # Initialize altitude tracking for damping
+                        if not hasattr(self, 'prev_altitude_collect'):
+                            self.prev_altitude_collect = current_altitude
+                            self.prev_altitude_time_collect = self.robot.getTime()
+                        
+                        # Calculate vertical velocity for damping
+                        current_time = self.robot.getTime()
+                        dt_actual = current_time - self.prev_altitude_time_collect
+                        if dt_actual > 0:
+                            vertical_velocity = (current_altitude - self.prev_altitude_collect) / dt_actual
+                        else:
+                            vertical_velocity = 0.0
+                        
+                        self.prev_altitude_collect = current_altitude
+                        self.prev_altitude_time_collect = current_time
+                        
+                        # Altitude control with dead zone
+                        if abs(alt_error) < 0.2:  # Within 20cm - dead zone
+                            vertical_input = 0.0
+                        else:
+                            # Conservative altitude control during data collection
+                            k_vertical_p = 0.5  # Proportional gain
+                            k_vertical_d = 4.0  # Damping gain
+                            
+                            # Reduce correction if already moving toward target
+                            if alt_error > 0 and vertical_velocity < -0.1:
+                                # Above target and descending - reduce correction
+                                correction_multiplier = 0.5
+                            elif alt_error < 0 and vertical_velocity > 0.1:
+                                # Below target and ascending - reduce correction
+                                correction_multiplier = 0.5
+                            else:
+                                correction_multiplier = 1.0
+                            
+                            # Linear control with damping
+                            vertical_input = correction_multiplier * (k_vertical_p * alt_error - k_vertical_d * vertical_velocity)
+                            
+                            # Smooth vertical input
+                            if not hasattr(self, 'prev_vertical_input_collect'):
+                                self.prev_vertical_input_collect = 0.0
+                            
+                            smoothing_factor = 0.2
+                            vertical_input = self.prev_vertical_input_collect * (1 - smoothing_factor) + vertical_input * smoothing_factor
+                            self.prev_vertical_input_collect = vertical_input
+                            
+                            # Clamp vertical input
+                            vertical_input = max(-1.0, min(1.0, vertical_input))
+                        
+                        # Use same gentle control formula as hover phase
+                        k_roll_p = 50.0
+                        k_pitch_p = 30.0
+                        
+                        roll_clamped = max(-1.0, min(1.0, roll))
+                        pitch_clamped = max(-1.0, min(1.0, pitch))
+                        
+                        roll_input = k_roll_p * roll_clamped + roll_vel
+                        pitch_input = k_pitch_p * pitch_clamped + pitch_vel
+                        yaw_input = 0  # No yaw during data collection
+                        
+                        # Clamp inputs to prevent extreme corrections
+                        roll_input = max(-10.0, min(10.0, roll_input))
+                        pitch_input = max(-10.0, min(10.0, pitch_input))
+                        
+                        # Calculate motor inputs exactly like working C code
+                        # action is the base thrust (same for all motors from random exploration)
+                        # Add vertical input to maintain altitude
+                        base_thrust = action[0] + vertical_input  # Add altitude correction
+                        
+                        front_left_input = base_thrust - roll_input + pitch_input - yaw_input
+                        front_right_input = base_thrust + roll_input + pitch_input + yaw_input
+                        rear_left_input = base_thrust - roll_input - pitch_input + yaw_input
+                        rear_right_input = base_thrust + roll_input - pitch_input - yaw_input
+                        
+                        motor_velocities = [front_left_input, front_right_input, rear_left_input, rear_right_input]
+                        
+                        # Clamp motor velocities to safe range (slightly wider to allow altitude correction)
+                        motor_velocities = [max(67.0, min(70.5, v)) for v in motor_velocities]
+                        
+                        # Motor signs: [1, -1, -1, 1] (front_left, front_right, rear_left, rear_right)
+                        signs = [1, -1, -1, 1]
+                        for motor, vel, sign in zip(self.control.motors, motor_velocities, signs):
+                            motor.setVelocity(sign * vel)
+                        
+                        # Keep camera centered during data collection
+                        try:
+                            self.control.camera_roll_motor.setPosition(0.0)
+                            self.control.camera_pitch_motor.setPosition(0.0)
+                        except:
+                            pass
                     except Exception as e:
                         print(f"⚠ Warning: Failed to execute action: {e}")
                         import traceback
