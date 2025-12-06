@@ -21,14 +21,12 @@ from perception import Perception
 from path_planner import PathPlanner
 
 
-class DroneController:
+class DroneController():
     def __init__(self):
         print("Initialising Drone Controller...")
-        
+
         self.robot = Robot()
         self.timestep = int(self.robot.getBasicTimeStep())
-        self.camera = self.robot.getDevice("camera")
-        self.camera.enable(self.timestep)
         self.front_left_led = self.robot.getDevice("front left led")
         self.front_right_led = self.robot.getDevice("front right led")
         
