@@ -48,13 +48,8 @@ class Control():
         self.integral = {'roll': 0, 'pitch': 0, 'yaw': 0, 'vertical': 0}
         self.prev_error = {'roll': 0, 'pitch': 0, 'yaw': 0, 'vertical': 0}
     
-<<<<<<< Updated upstream
-        self.k_vertical_thrust = 68.5  # with this thrust, the drone lifts.
-        self.k_vertical_offset = 0.6 
-=======
         self.k_vertical_thrust = 68.5;  # with this thrust, the drone lifts.
         self.k_vertical_offset = 0.6; 
->>>>>>> Stashed changes
         
         
     def process_signal(self, vel):
