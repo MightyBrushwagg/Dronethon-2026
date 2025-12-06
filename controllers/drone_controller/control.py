@@ -5,14 +5,15 @@ def sign(x):
     """Return the sign of x: 1 if positive, -1 if negative, 0 if zero."""
     return 1 if x > 0 else (-1 if x < 0 else 0)
 
-class Control(Robot):
-    def __init__(self, timestep):
-        super().__init__()
+class Control():
+    def __init__(self, robot, timestep):
+        self.robot = robot
+        
         # motors
-        self.fl_motor = Robot.getDevice("front left propeller")
-        self.fr_motor = Robot.getDevice("front right propeller")
-        self.rl_motor = Robot.getDevice("rear left propeller")
-        self.rr_motor = Robot.getDevice("rear right propeller")
+        self.fl_motor = self.robot.getDevice("front left propeller")
+        self.fr_motor = self.robot.getDevice("front right propeller")
+        self.rl_motor = self.robot.getDevice("rear left propeller")
+        self.rr_motor = self.robot.getDevice("rear right propeller")
         self.motors = [self.fl_motor, self.fr_motor, self.rl_motor, self.rr_motor]
         
         self.timestep = timestep
@@ -22,15 +23,15 @@ class Control(Robot):
         self.camera_pitch_motor = self.robot.getDevice("camera pitch")
         self.camera_roll_motor.setPosition(0)
         self.camera_pitch_motor.setPosition(0)
-        self.camera_roll_motor.enable(self.timestep)
-        self.camera_pitch_motor.enable(self.timestep)
+        self.camera_roll_motor.enableForceFeedback(self.timestep)
+        self.camera_pitch_motor.enableForceFeedback(self.timestep)
         
         # sensors
-        self.imu = self.getDevice("inertial unit")
+        self.imu = self.robot.getDevice("inertial unit")
         self.imu.enable(timestep)
-        self.gps = self.getDevice("gps")
+        self.gps = self.robot.getDevice("gps")
         self.gps.enable(timestep)
-        self.gyro = self.getDevice("gyro")
+        self.gyro = self.robot.getDevice("gyro")
         self.gyro.enable(timestep)
             
         # initalising motors
@@ -53,6 +54,7 @@ class Control(Robot):
         
         
     def process_signal(self, vel):
+        print(f"these are the vels: {vel}")
         """receive 4 velocities for each propeller"""
         for motor, v in zip(self.motors, vel):
             # motor.setPosition(float('inf'))
@@ -93,8 +95,10 @@ class Control(Robot):
         
         return [signs[i] * (vel[i] + corrections[i]) for i in range(4)]
         
-     def STOP(self):
-         """emergency STOP ALL MOTORS"""
-         for motor in self.motors:
+        
+    def STOP(self):
+        """emergency STOP ALL MOTORS"""
+        for motor in self.motors:
             motor.setPosition(float('inf'))
             motor.setVelocity(1.0)
+        

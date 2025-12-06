@@ -235,4 +235,5 @@ ToyotaPrius {
   rotation 0 0 1 -2.3561953071795863
 }
 Mavic2Pro {
+  controller "drone_controller"
 }
