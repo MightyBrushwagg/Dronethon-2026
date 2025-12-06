@@ -41,7 +41,7 @@ class Control():
             motor.setVelocity(1.0)
             
         # PID gains TO TUNE!
-        self.k_roll = {'p': 1.0, 'i': 0.0, 'd': 0.1}
+        self.k_roll = {'p': 8.0, 'i': 0.0, 'd': 0.1}
         self.k_pitch = {'p': 10.0, 'i': 5.0, 'd': 1}
         self.k_yaw = {'p': 0.1, 'i': 0.0, 'd': 0.05}  # Reduced yaw gain to prevent spinning
         
@@ -70,7 +70,7 @@ class Control():
         
         
     def process_signal(self, vel):
-        # print(f"these are the vels: {vel}")
+        print("these are the vels: ")
         """receive 4 velocities for each propeller"""
         # Motor signs from working C code: [1, -1, -1, 1]
         # front_left: positive, front_right: negative, rear_left: negative, rear_right: positive
@@ -80,6 +80,7 @@ class Control():
             signed_vel = sign * v
             clamped = max(-576, min(576, signed_vel))  # respect motor limits
             motor.setVelocity(clamped)
+        print()
             
     def _pid(self, error, axis, gains, dt):
         self.integral[axis] += error * dt
