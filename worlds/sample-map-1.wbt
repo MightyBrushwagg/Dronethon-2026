@@ -11,7 +11,7 @@ WorldInfo {
 }
 Viewpoint {
   orientation -0.3511958752339285 0.1570185692495003 0.9230420500332122 2.3059128529110375
-  position 0.10518054626212703 2.0743371850737815 5.815383607045099
+  position 1.70268661309223 0.036979012539193834 8.077980804578345
   follow "Mavic 2 PRO"
 }
 TexturedBackground {
@@ -22,7 +22,7 @@ RectangleArena {
   floorSize 20 20
 }
 FireExtinguisher {
-  translation -3.77053 8.44514 -0.00674574
+  translation -1.79053 8.44514 0.00872167
   rotation 0.0033431815021026357 -0.004468651800070362 -0.999984427023008 1.5708108802860339
 }
 DEF flacon MedicineBottle {
@@ -33,7 +33,7 @@ Telephone {
   translation -0.660444 -9.88061 1.21
   rotation 0 0 1 1.0472
 }
-DEF DRONE Robot {
+DEF MAVIC Robot {
   translation -3.71947 6.33255 1.06168
   rotation 0.004604961734306191 0.00020245707624874667 0.9999893766128508 1.54576
   children [
@@ -1151,5 +1151,5 @@ DEF DRONE Robot {
       -0.088 0 -0.04
     ]
   }
-  controller "data_collector_controller"
+  controller "drone_controller"
 }

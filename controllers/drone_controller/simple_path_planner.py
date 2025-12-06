@@ -255,6 +255,18 @@ class SimplePathPlanner:
         self.obstacle_penalty = 1000.0  # Penalty for targets near obstacles
         self.avoidance_margin = 0.5  # Additional margin when avoiding obstacles
         
+        # Boundary safety margin - keep targets away from edges
+        self.boundary_margin = 1.0  # Safety margin from world boundaries (meters)
+        # Effective bounds for target generation (smaller than world bounds)
+        self.target_bounds = {
+            "x_min": self.world_bounds["x_min"] + self.boundary_margin,
+            "x_max": self.world_bounds["x_max"] - self.boundary_margin,
+            "y_min": self.world_bounds["y_min"] + self.boundary_margin,
+            "y_max": self.world_bounds["y_max"] - self.boundary_margin,
+            "z_min": self.world_bounds["z_min"],
+            "z_max": self.world_bounds["z_max"]
+        }
+        
         # PID gains for position control (tuned for smooth movement)
         self.kp_xy = 0.8  # Position gain for x/y
         self.kp_z = 1.0   # Position gain for z (altitude)
@@ -266,7 +278,7 @@ class SimplePathPlanner:
         self.integral_xy = np.array([0.0, 0.0])
         
         # Target altitude for exploration
-        self.target_altitude = 2.0  # 2 meters above ground
+        self.target_altitude = 0.5  # 0.5 meters above ground
         
         # State tracking
         self.has_taken_off = False
@@ -276,6 +288,14 @@ class SimplePathPlanner:
         # This will be updated once we get the first position reading
         self.current_target = None
         self.initial_target_set = False
+        
+        # Target reaching criteria
+        self.target_reached_distance = 0.1  # Must be within 0.1m to consider reached
+        self.target_reached_vertical = 0.1  # Vertical tolerance
+        self.stable_velocity_threshold = 0.15  # Maximum velocity to be considered stable (m/s)
+        self.stable_angular_velocity_threshold = 0.2  # Maximum angular velocity to be considered stable (rad/s)
+        self.target_reached_time = None  # Time when target was first reached and stable
+        self.scan_time_required = 1.0  # Time to scan at target before moving (seconds)
         
         print("[SIMPLE PLANNER] Path planner initialized (no transition model needed!)")
     
@@ -313,14 +333,14 @@ class SimplePathPlanner:
         )
         
         if len(targets) > 0:
-            # Set target altitude and clamp to world bounds
+            # Set target altitude and clamp to safe bounds (with margin)
             target = targets[0].copy()
             target[2] = self.target_altitude  # Set target altitude
             
-            # Clamp target to world bounds
-            target[0] = np.clip(target[0], self.world_bounds["x_min"], self.world_bounds["x_max"])
-            target[1] = np.clip(target[1], self.world_bounds["y_min"], self.world_bounds["y_max"])
-            target[2] = np.clip(target[2], self.world_bounds["z_min"], self.world_bounds["z_max"])
+            # Clamp target to safe bounds (with margin from edges)
+            target[0] = np.clip(target[0], self.target_bounds["x_min"], self.target_bounds["x_max"])
+            target[1] = np.clip(target[1], self.target_bounds["y_min"], self.target_bounds["y_max"])
+            target[2] = np.clip(target[2], self.target_bounds["z_min"], self.target_bounds["z_max"])
             
             self.current_target = target
             
@@ -331,11 +351,11 @@ class SimplePathPlanner:
         else:
             # No more unexplored areas nearby, expand search
             if self.current_target is None:
-                # Set a default target to ensure we take off (clamped to bounds)
-                center_x = (self.world_bounds["x_min"] + self.world_bounds["x_max"]) / 2
-                center_y = (self.world_bounds["y_min"] + self.world_bounds["y_max"]) / 2
+                # Set a default target to ensure we take off (clamped to safe bounds)
+                center_x = (self.target_bounds["x_min"] + self.target_bounds["x_max"]) / 2
+                center_y = (self.target_bounds["y_min"] + self.target_bounds["y_max"]) / 2
                 self.current_target = np.array([center_x, center_y, self.target_altitude])
-                print("[EXPLORATION] No unexplored areas nearby, using center target for takeoff")
+                print("[EXPLORATION] No unexplored areas nearby, using safe center target for takeoff")
     
     def get_desired_pose(self, state):
         """
@@ -361,25 +381,55 @@ class SimplePathPlanner:
             self.initial_target_set = True
             print(f"[TAKEOFF] Setting initial target at altitude {self.target_altitude}m to ensure takeoff")
         
-        # Clamp target to world bounds
+        # Clamp target to safe bounds (with margin from edges)
         if self.current_target is not None:
             self.current_target = np.array([
-                np.clip(self.current_target[0], self.world_bounds["x_min"], self.world_bounds["x_max"]),
-                np.clip(self.current_target[1], self.world_bounds["y_min"], self.world_bounds["y_max"]),
-                np.clip(self.current_target[2], self.world_bounds["z_min"], self.world_bounds["z_max"])
+                np.clip(self.current_target[0], self.target_bounds["x_min"], self.target_bounds["x_max"]),
+                np.clip(self.current_target[1], self.target_bounds["y_min"], self.target_bounds["y_max"]),
+                np.clip(self.current_target[2], self.target_bounds["z_min"], self.target_bounds["z_max"])
             ])
         
-        # Check if we're outside bounds and create a target to return
-        margin = 0.5  # Safety margin
-        outside_bounds = (position[0] < self.world_bounds["x_min"] - margin or position[0] > self.world_bounds["x_max"] + margin or
-                          position[1] < self.world_bounds["y_min"] - margin or position[1] > self.world_bounds["y_max"] + margin)
+        # Check if we're outside bounds and create a target to return (use smaller margin for detection)
+        detection_margin = 0.3  # Smaller margin for detection (more aggressive)
+        outside_bounds = (position[0] < self.world_bounds["x_min"] + detection_margin or 
+                          position[0] > self.world_bounds["x_max"] - detection_margin or
+                          position[1] < self.world_bounds["y_min"] + detection_margin or 
+                          position[1] > self.world_bounds["y_max"] - detection_margin)
         
         if outside_bounds:
-            # Force target to center of arena
-            center_x = (self.world_bounds["x_min"] + self.world_bounds["x_max"]) / 2
-            center_y = (self.world_bounds["y_min"] + self.world_bounds["y_max"]) / 2
+            # Force target to center of safe area (not exact center, but well within bounds)
+            center_x = (self.target_bounds["x_min"] + self.target_bounds["x_max"]) / 2
+            center_y = (self.target_bounds["y_min"] + self.target_bounds["y_max"]) / 2
             self.current_target = np.array([center_x, center_y, self.target_altitude])
-            print(f"[BOUNDARY] Drone outside bounds! Position: ({position[0]:.2f}, {position[1]:.2f}), Returning to center: ({center_x:.1f}, {center_y:.1f})")
+            # Reset integral to prevent overshoot
+            self.integral_xy = np.array([0.0, 0.0])
+            print(f"[BOUNDARY] Drone outside bounds! Position: ({position[0]:.2f}, {position[1]:.2f}), Returning to safe center: ({center_x:.1f}, {center_y:.1f})")
+        
+        # Check if we're getting too close to boundaries and adjust target if needed
+        boundary_check_margin = 0.5  # Check when within 0.5m of boundary
+        near_boundary = (position[0] < self.world_bounds["x_min"] + boundary_check_margin or 
+                         position[0] > self.world_bounds["x_max"] - boundary_check_margin or
+                         position[1] < self.world_bounds["y_min"] + boundary_check_margin or 
+                         position[1] > self.world_bounds["y_max"] - boundary_check_margin)
+        
+        if near_boundary and self.current_target is not None:
+            # If target is also near boundary, move it away
+            target_near_boundary = (self.current_target[0] < self.world_bounds["x_min"] + boundary_check_margin or 
+                                    self.current_target[0] > self.world_bounds["x_max"] - boundary_check_margin or
+                                    self.current_target[1] < self.world_bounds["y_min"] + boundary_check_margin or 
+                                    self.current_target[1] > self.world_bounds["y_max"] - boundary_check_margin)
+            
+            if target_near_boundary:
+                # Move target away from boundary toward center
+                center_x = (self.target_bounds["x_min"] + self.target_bounds["x_max"]) / 2
+                center_y = (self.target_bounds["y_min"] + self.target_bounds["y_max"]) / 2
+                # Interpolate toward center
+                self.current_target[0] = 0.7 * self.current_target[0] + 0.3 * center_x
+                self.current_target[1] = 0.7 * self.current_target[1] + 0.3 * center_y
+                # Clamp to safe bounds
+                self.current_target[0] = np.clip(self.current_target[0], self.target_bounds["x_min"], self.target_bounds["x_max"])
+                self.current_target[1] = np.clip(self.current_target[1], self.target_bounds["y_min"], self.target_bounds["y_max"])
+                self.current_target[2] = np.clip(self.current_target[2], self.target_bounds["z_min"], self.target_bounds["z_max"])
         
         # Check for obstacles and adjust target if necessary
         adjusted_target = self._adjust_target_for_obstacles(position, self.current_target.copy())
@@ -390,50 +440,84 @@ class SimplePathPlanner:
         horizontal_distance = np.linalg.norm(error[:2])
         vertical_distance = abs(error[2])
         
-        # Check if we've reached the target position
-        position_reached = horizontal_distance < 0.5 and vertical_distance < 0.3
+        # Get current velocity and angular velocity for stability check
+        velocity = state[6:9]  # [vx, vy, vz]
+        angular_velocity = state[9:12]  # [wx, wy, wz]
+        horizontal_velocity = np.linalg.norm(velocity[:2])
+        vertical_velocity = abs(velocity[2])
+        angular_velocity_magnitude = np.linalg.norm(angular_velocity)
         
-        # Check if current position has been fully explored (all orientations)
-        # For now, we'll consider a position "fully explored" if we've been there
-        # In the future, we could track which yaw angles have been explored
+        # Check if we're within the tight error distance
+        within_distance = horizontal_distance < self.target_reached_distance and vertical_distance < self.target_reached_vertical
+        
+        # Check if movement is stable (low velocity)
+        is_stable = (horizontal_velocity < self.stable_velocity_threshold and 
+                    vertical_velocity < self.stable_velocity_threshold and
+                    angular_velocity_magnitude < self.stable_angular_velocity_threshold)
+        
+        # Check if target is reached and stable
+        target_reached_and_stable = within_distance and is_stable
+        
+        # Track when target was first reached and stable
+        current_time = self.robot.getTime()
+        if target_reached_and_stable:
+            if self.target_reached_time is None:
+                # Just reached and became stable - start timer
+                self.target_reached_time = current_time
+                print(f"[TARGET] Reached target and stable! Distance: {horizontal_distance:.3f}m, "
+                      f"scanning for {self.scan_time_required}s...")
+        else:
+            # Not reached or not stable - reset timer
+            self.target_reached_time = None
+        
+        # Check if we've scanned long enough at this target
+        scanned_long_enough = False
+        if self.target_reached_time is not None:
+            time_at_target = current_time - self.target_reached_time
+            if time_at_target >= self.scan_time_required:
+                scanned_long_enough = True
+                print(f"[TARGET] Scanning complete ({time_at_target:.1f}s), ready for next target")
+        
+        # Check if current position has been fully explored (initialize for later use)
         exploration_value = self.exploration_map.get_exploration_value(position)
         fully_explored = exploration_value > 3  # Visited at least 3 times
         
-        if position_reached:
-            # Reached target position
+        # Only update target if we've reached, are stable, and scanned long enough
+        if scanned_long_enough:
             if fully_explored:
                 # Position fully explored, get new target
                 self._update_exploration_targets(position)
                 if self.current_target is None:
                     self.current_target = np.array([position[0], position[1], self.target_altitude])
+                # Reset timer for new target
+                self.target_reached_time = None
                 error = self.current_target - position
                 horizontal_distance = np.linalg.norm(error[:2])
                 vertical_distance = abs(error[2])
-                position_reached = False
+                print(f"[TARGET] Moving to new target: ({self.current_target[0]:.1f}, {self.current_target[1]:.1f}, {self.current_target[2]:.1f})")
             else:
-                # Position reached but not fully explored - explore different orientations
-                # For now, just keep the same position but we could add orientation exploration
-                pass
+                # Position reached but not fully explored - keep scanning
+                # Reset timer to continue scanning
+                self.target_reached_time = current_time - (self.scan_time_required * 0.5)  # Extend scan time
+        
+        # Use target_reached_and_stable for orientation exploration logic
+        position_reached = target_reached_and_stable
         
         # Determine desired orientation
-        # For level flight, roll and pitch should be 0
-        # Yaw can be set to face the target direction or explore different orientations
+        # For level flight, roll and pitch should be 0 (position control handles movement)
         desired_roll = 0.0
         desired_pitch = 0.0
         
-        # If at target position but not fully explored, explore different yaw angles
+        # Yaw control: Only change yaw when scanning at target, not during movement
         if position_reached and not fully_explored:
+            # At target and scanning - explore different yaw angles for scanning
             # Rotate yaw to explore different directions
             # Simple strategy: increment yaw by 45 degrees each time
             target_yaw = (yaw + np.pi / 4) % (2 * np.pi)
         else:
-            # Point yaw toward target
-            if horizontal_distance > 0.1:
-                target_direction = np.arctan2(error[1], error[0])
-                target_yaw = target_direction
-            else:
-                # Close to target, maintain current yaw
-                target_yaw = yaw
+            # During movement: maintain current yaw (no rotation)
+            # Position control will use roll/pitch to move toward target
+            target_yaw = yaw  # Keep current yaw - don't rotate during movement
         
         desired_yaw = target_yaw
         
@@ -511,10 +595,10 @@ class SimplePathPlanner:
                 # Too close to ground, raise target
                 adjusted_target[2] = min(self.world_bounds["z_max"], adjusted_target[2] + self.avoidance_margin)
             
-            # Clamp to world bounds
-            adjusted_target[0] = np.clip(adjusted_target[0], self.world_bounds["x_min"], self.world_bounds["x_max"])
-            adjusted_target[1] = np.clip(adjusted_target[1], self.world_bounds["y_min"], self.world_bounds["y_max"])
-            adjusted_target[2] = np.clip(adjusted_target[2], self.world_bounds["z_min"], self.world_bounds["z_max"])
+            # Clamp to safe bounds (with margin from edges)
+            adjusted_target[0] = np.clip(adjusted_target[0], self.target_bounds["x_min"], self.target_bounds["x_max"])
+            adjusted_target[1] = np.clip(adjusted_target[1], self.target_bounds["y_min"], self.target_bounds["y_max"])
+            adjusted_target[2] = np.clip(adjusted_target[2], self.target_bounds["z_min"], self.target_bounds["z_max"])
             
             return adjusted_target
         

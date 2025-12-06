@@ -43,6 +43,9 @@ class DroneController():
             "z_max": 4.0
         }
         
+        # Set world bounds in control system for boundary enforcement
+        self.control.set_world_bounds(world_bounds)
+        
         # Initialize simplified path planner (no transition model needed!)
         print("[INIT] Initializing simple exploration path planner...")
         self.path_planner = SimplePathPlanner(
