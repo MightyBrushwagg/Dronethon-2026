@@ -58,7 +58,7 @@ class Control():
         
         
     def process_signal(self, vel):
-        print(f"these are the vels: {vel}")
+        # print(f"these are the vels: {vel}")
         """receive 4 velocities for each propeller"""
         # signs = [1, -1, -1, 1]
         for motor, v in zip(self.motors, vel):
