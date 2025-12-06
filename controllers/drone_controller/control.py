@@ -1,6 +1,5 @@
 import math
 from controller import Robot, Camera, Compass, GPS, Gyro, InertialUnit, Keyboard, LED, Motor
-target_altitude = 1.0  # The target altitude. Don't go lower!
 
 def sign(x):
     """Return the sign of x: 1 if positive, -1 if negative, 0 if zero."""
@@ -56,7 +55,7 @@ class Control(Robot):
     def process_signal(self, vel):
         """receive 4 velocities for each propeller"""
         for motor, v in zip(self.motors, vel):
-            motor.setPosition(float('inf'))
+            # motor.setPosition(float('inf'))
             motor.setVelocity(v)
             
     def _pid(self, error, axis, gains, dt):
@@ -94,3 +93,8 @@ class Control(Robot):
         
         return [signs[i] * (vel[i] + corrections[i]) for i in range(4)]
         
+     def STOP(self):
+         """emergency STOP ALL MOTORS"""
+         for motor in self.motors:
+            motor.setPosition(float('inf'))
+            motor.setVelocity(1.0)
