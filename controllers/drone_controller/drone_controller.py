@@ -45,7 +45,7 @@ class DroneController():
             # start_state = self.perception.get_state_vector()
             # action = self.path_planner.get_best_action(start_state, num_steps=10)
             action = [1, 0, 0, 1]
-            velocities = self.control.stabilise(self.timestep, action)
+            velocities = self.control.stabilise(self.timestep/1000, action)
             self.control.process_signal(velocities)  # this should change propellers
             
             pass
