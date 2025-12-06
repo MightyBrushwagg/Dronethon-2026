@@ -40,7 +40,7 @@ class Control():
             motor.setVelocity(1.0)
             
         # PID gains TO TUNE!
-        self.k_roll = {'p': 1.0, 'i': 0.0, 'd': 0.1}
+        self.k_roll = {'p': 8.0, 'i': 0.0, 'd': 0.1}
         self.k_pitch = {'p': 10.0, 'i': 5.0, 'd': 1}
         self.k_yaw = {'p': 0.5, 'i': 0.0, 'd': 0.0}
         
@@ -53,13 +53,15 @@ class Control():
         
         
     def process_signal(self, vel):
-        # print(f"these are the vels: {vel}")
+        print("these are the vels: ")
         """receive 4 velocities for each propeller"""
-        # signs = [1, -1, -1, 1]
-        for motor, v in zip(self.motors, vel):
+        signs = [1, -1, -1, 1]
+        for motor, v, s in zip(self.motors, vel, signs):
             # motor.setPosition(float('inf'))
-            clamped = max(-576, min(576, v))  # respect motor limits
+            clamped = max(-576, min(576, v*s))  # respect motor limits
+            print(v*s, end=" ")
             motor.setVelocity(clamped)
+        print()
             
     def _pid(self, error, axis, gains, dt):
         self.integral[axis] += error * dt
@@ -82,8 +84,8 @@ class Control():
         self.camera_pitch_motor.setPosition(-0.1 * pitch_vel)
         
         # pid for stabilisation
-        roll_corr = self._pid(max(-1, min(1, roll)), 'roll', self.k_roll, dt) + roll_vel
-        pitch_corr = self._pid(max(-1, min(1, pitch)), 'pitch', self.k_pitch, dt) + pitch_vel
+        roll_corr = self._pid(max(-1, min(1, roll)), 'roll', self.k_roll, dt)
+        pitch_corr = self._pid(max(-1, min(1, pitch)), 'pitch', self.k_pitch, dt)
         yaw_corr = self._pid(yaw_vel, 'yaw', self.k_yaw, dt)
         
         corrections = [
