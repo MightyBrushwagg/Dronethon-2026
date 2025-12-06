@@ -42,8 +42,10 @@ class DroneController():
             time = self.robot.getTime()  # in seconds
             
             # controlling motors
-            vel = [2, 2, 1, 1] # HERE!!! pass in your list of 4 velocites as vel
-            velocities = self.control.stabilise(self.timestep, vel)
+            start_state = self.perception.get_state_vector()
+            action = self.path_planner.get_best_action(start_state, num_steps=10)
+
+            velocities = self.control.stabilise(self.timestep, action)
             self.control.process_signal(velocities)  # this should change propellers
             
             pass

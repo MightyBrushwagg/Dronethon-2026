@@ -13,65 +13,6 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
 
-class DroneModelBasedEnv(ModelBasedEnvBase):
-    """
-    Model-based environment for drone path planning.
-    State: [x, y, z, roll, pitch, yaw, vx, vy, vz, wx, wy, wz]
-    Action: [motor1_vel, motor2_vel, motor3_vel, motor4_vel]
-    """
-    def __init__(self, world_model, device="cpu", dtype=None, batch_size=None):
-        super().__init__(world_model, device=device, dtype=dtype, batch_size=batch_size)
-        
-        # position (3) + orientation (3) + linear velocity (3) + angular velocity (3) = 12
-        state_dim = 12
-        # 4 motor velocities
-        action_dim = 4
-        
-        self.state_spec = CompositeSpec(
-            state=UnboundedContinuousTensorSpec((state_dim,))
-        )
-
-        self.observation_spec = CompositeSpec(
-            state=UnboundedContinuousTensorSpec((state_dim,))
-        )
-
-        self.action_spec = UnboundedContinuousTensorSpec((action_dim,))
-        self.reward_spec = UnboundedContinuousTensorSpec((1,))
-    
-    def _reset(self, tensordict: TensorDict) -> TensorDict:
-        """
-        Reset the environment to an initial state.
-        """
-        if tensordict is None or tensordict.is_empty():
-            tensordict = TensorDict(
-                {},
-                batch_size=self.batch_size,
-                device=self.device,
-            )
-        
-        # Initialise state: [x, y, z, roll, pitch, yaw, vx, vy, vz, wx, wy, wz]
-        # Start at origin with zero velocities
-        initial_state = torch.zeros(
-            (*self.batch_size, 12),
-            device=self.device,
-            dtype=self.dtype
-        )
-        
-        tensordict = tensordict.update(
-            self.state_spec.zero()
-        )
-
-        tensordict["state"] = initial_state
-
-        tensordict = tensordict.update(
-            self.observation_spec.zero()
-        )
-
-        tensordict["state"] = initial_state
-        
-        return tensordict
-
-
 class PathPlanner():
     def __init__(self, robot, timestep, perception=None, goal_positions=None, world_bounds=None):
         """
@@ -183,6 +124,79 @@ class PathPlanner():
             if hasattr(self.env.world_model, "reward_model"):
                 if hasattr(self.env.world_model.reward_model, "goal_positions"):
                     self.env.world_model.reward_model.goal_positions = new_goal_positions
+
+    def get_best_action(self, start_state, num_steps=10):
+        """
+        Get the best action from the planner.
+        """
+        start_state = torch.tensor(start_state, device=device, dtype=torch.float32)
+
+        path = self.planner.plan(start_state, num_steps)
+
+        best_action = path["action"][0]
+
+        best_action = best_action.detach().cpu().numpy()
+
+        return best_action
+
+
+class DroneModelBasedEnv(ModelBasedEnvBase):
+    """
+    Model-based environment for drone path planning.
+    State: [x, y, z, roll, pitch, yaw, vx, vy, vz, wx, wy, wz]
+    Action: [motor1_vel, motor2_vel, motor3_vel, motor4_vel]
+    """
+    def __init__(self, world_model, device="cpu", dtype=None, batch_size=None):
+        super().__init__(world_model, device=device, dtype=dtype, batch_size=batch_size)
+        
+        # position (3) + orientation (3) + linear velocity (3) + angular velocity (3) = 12
+        state_dim = 12
+        # 4 motor velocities
+        action_dim = 4
+        
+        self.state_spec = CompositeSpec(
+            state=UnboundedContinuousTensorSpec((state_dim,))
+        )
+
+        self.observation_spec = CompositeSpec(
+            state=UnboundedContinuousTensorSpec((state_dim,))
+        )
+
+        self.action_spec = UnboundedContinuousTensorSpec((action_dim,))
+        self.reward_spec = UnboundedContinuousTensorSpec((1,))
+    
+    def _reset(self, tensordict: TensorDict) -> TensorDict:
+        """
+        Reset the environment to an initial state.
+        """
+        if tensordict is None or tensordict.is_empty():
+            tensordict = TensorDict(
+                {},
+                batch_size=self.batch_size,
+                device=self.device,
+            )
+        
+        # Initialise state: [x, y, z, roll, pitch, yaw, vx, vy, vz, wx, wy, wz]
+        # Start at origin with zero velocities
+        initial_state = torch.zeros(
+            (*self.batch_size, 12),
+            device=self.device,
+            dtype=self.dtype
+        )
+        
+        tensordict = tensordict.update(
+            self.state_spec.zero()
+        )
+
+        tensordict["state"] = initial_state
+
+        tensordict = tensordict.update(
+            self.observation_spec.zero()
+        )
+
+        tensordict["state"] = initial_state
+        
+        return tensordict
 
 
 class WorldAwareRewardModel(TensorDictModule):
