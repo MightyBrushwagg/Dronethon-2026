@@ -54,7 +54,7 @@ class Control():
         
         
     def process_signal(self, vel):
-        print(f"these are the vels: {vel}")
+        # print(f"these are the vels: {vel}")
         """receive 4 velocities for each propeller"""
         for motor, v in zip(self.motors, vel):
             # motor.setPosition(float('inf'))

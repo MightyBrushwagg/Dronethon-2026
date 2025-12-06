@@ -7,7 +7,7 @@ from torchrl.envs.model_based import ModelBasedEnvBase
 from tensordict.nn import TensorDictModule
 from torchrl.modules import ValueOperator, MLP, WorldModelWrapper
 from torchrl.objectives.value import TDLambdaEstimator
-from torchrl.planners.mppi import MPPIPlanner
+from torchrl.modules.planners.mppi import MPPIPlanner
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
