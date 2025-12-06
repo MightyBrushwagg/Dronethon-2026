@@ -6,10 +6,6 @@ EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/project
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/factory/fire_extinguisher/protos/FireExtinguisher.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/hospital/protos/MedicineBottle.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/telephone/protos/Telephone.proto"
-<<<<<<< HEAD
-EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/robots/dji/mavic/protos/Mavic2Pro.proto"
-=======
->>>>>>> 06085646dc634257cf4315422f81c93183aab3b9
 
 WorldInfo {
 }
@@ -37,11 +33,6 @@ Telephone {
   translation -0.660444 -9.88061 1.21
   rotation 0 0 1 1.0472
 }
-<<<<<<< HEAD
-Mavic2Pro {
-  controller "data_collector_controller"
-  supervisor TRUE
-=======
 Robot {
   translation -3.71947 6.33255 1.06168
   rotation 0.004604961734306191 0.00020245707624874667 0.9999893766128508 1.54576
@@ -1161,5 +1152,4 @@ Robot {
     ]
   }
   controller "drone_controller"
->>>>>>> 06085646dc634257cf4315422f81c93183aab3b9
 }
