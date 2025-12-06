@@ -40,7 +40,7 @@ Robot {
     DEF BODY_SLOT Group {
       children [
         Lidar {
-          translation 0.15 0 -0.05
+          translation 0.15 0 -0.04
         }
       ]
     }
