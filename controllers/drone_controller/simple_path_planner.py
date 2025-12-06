@@ -267,15 +267,8 @@ class SimplePathPlanner:
             "z_max": self.world_bounds["z_max"]
         }
         
-        # PID gains for position control (tuned for smooth movement)
-        self.kp_xy = 0.8  # Position gain for x/y
-        self.kp_z = 1.0   # Position gain for z (altitude)
-        self.kd_xy = 0.3  # Velocity damping for x/y (increased to prevent overshoot)
-        self.kd_z = 0.2   # Velocity damping for z
-        self.ki_xy = 0.01  # Integral term for x/y (small to prevent drift)
-        
-        # Integral accumulation for horizontal control
-        self.integral_xy = np.array([0.0, 0.0])
+        # Note: Position control PID gains are handled in control.py
+        # No PID values needed here - path planner only provides target positions
         
         # Target altitude for exploration
         self.target_altitude = 0.5  # 0.5 meters above ground
@@ -296,6 +289,11 @@ class SimplePathPlanner:
         self.stable_angular_velocity_threshold = 0.2  # Maximum angular velocity to be considered stable (rad/s)
         self.target_reached_time = None  # Time when target was first reached and stable
         self.scan_time_required = 1.0  # Time to scan at target before moving (seconds)
+        
+        # Scanning state - track scanning yaw target to prevent continuous spinning
+        self.scanning_yaw_target = None  # Target yaw when scanning (only set when starting to scan)
+        self.scan_yaw_update_time = None  # Time when we last updated scanning yaw
+        self.scan_yaw_update_interval = 2.0  # Update scanning yaw every 2 seconds
         
         print("[SIMPLE PLANNER] Path planner initialized (no transition model needed!)")
     
@@ -401,8 +399,7 @@ class SimplePathPlanner:
             center_x = (self.target_bounds["x_min"] + self.target_bounds["x_max"]) / 2
             center_y = (self.target_bounds["y_min"] + self.target_bounds["y_max"]) / 2
             self.current_target = np.array([center_x, center_y, self.target_altitude])
-            # Reset integral to prevent overshoot
-            self.integral_xy = np.array([0.0, 0.0])
+            # Note: Integral reset is handled in control.py
             print(f"[BOUNDARY] Drone outside bounds! Position: ({position[0]:.2f}, {position[1]:.2f}), Returning to safe center: ({center_x:.1f}, {center_y:.1f})")
         
         # Check if we're getting too close to boundaries and adjust target if needed
@@ -511,11 +508,30 @@ class SimplePathPlanner:
         # Yaw control: Only change yaw when scanning at target, not during movement
         if position_reached and not fully_explored:
             # At target and scanning - explore different yaw angles for scanning
-            # Rotate yaw to explore different directions
-            # Simple strategy: increment yaw by 45 degrees each time
-            target_yaw = (yaw + np.pi / 4) % (2 * np.pi)
+            # Only update scanning yaw target periodically, not every timestep
+            current_time = self.robot.getTime()
+            
+            # Check if we need to update the scanning yaw target
+            if (self.scanning_yaw_target is None or 
+                self.scan_yaw_update_time is None or 
+                current_time - self.scan_yaw_update_time >= self.scan_yaw_update_interval):
+                # Update to a new scanning direction (increment by 45 degrees)
+                if self.scanning_yaw_target is None:
+                    # First time scanning - start from current yaw
+                    self.scanning_yaw_target = yaw
+                else:
+                    # Rotate to next scanning direction
+                    self.scanning_yaw_target = (self.scanning_yaw_target + np.pi / 4) % (2 * np.pi)
+                self.scan_yaw_update_time = current_time
+                print(f"[SCANNING] Updated scanning yaw target to {np.degrees(self.scanning_yaw_target):.1f} degrees")
+            
+            # Use the stored scanning yaw target (don't recalculate every timestep)
+            target_yaw = self.scanning_yaw_target
         else:
             # During movement: maintain current yaw (no rotation)
+            # Reset scanning state when not at target
+            self.scanning_yaw_target = None
+            self.scan_yaw_update_time = None
             # Position control will use roll/pitch to move toward target
             target_yaw = yaw  # Keep current yaw - don't rotate during movement
         
