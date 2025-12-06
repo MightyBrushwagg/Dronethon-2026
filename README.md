@@ -1,5 +1,5 @@
 ### Inter-University Drone Simulation Challenge 2025
-Hosted by RHUL Robotics & AI Society
+Hosted by RHUL Robotics & AI Society 
 
 Date: Saturday, 6th December 2025
 Location: Royal Holloway, University of London
